@@ -1,0 +1,62 @@
+#!/usr/bin/env python
+
+# Python imoports
+from __future__ import with_statement
+import re
+import sys
+import time
+from datetime import datetime
+from pytz import timezone
+from array import array
+
+# Scrapy imports
+from scrapy import log
+from scrapy import exceptions
+from scrapy.xlib.pydispatch import dispatcher
+from scrapy import signals
+from scrapy.selector import HtmlXPathSelector
+from scrapy.spider import BaseSpider
+from scrapy.http import Request
+
+# Custom imports
+from fatech_production.items import Car
+from fatech_production.items import Link
+from dbutil import *
+from spiderutil import *
+from recheck_template import RecheckSpider
+
+class CarsRecheckSpider(RecheckSpider):
+    """ lead spider class which can send request new URLs, parse html response and then throw scraped cars to Scrapy's pipeline. """
+
+    name = 'cars_recheck'  # name of the spider for calling: scrapy crawl spider_name
+    allowed_domains = ['www.cars.com']
+
+    def __init__(self, old_days=None, url_quantity=None, **kwargs):
+        """
+            Assign all custom settings
+        """
+        
+        # assign the name of the website to crawl
+        self.site = 'cars'
+
+        # base_url to add id to
+        self.base_url = "http://www.cars.com/go/search/detail_print.jsp?listingId="
+
+        super(CarsRecheckSpider, self).__init__(site=self.site, base_url=self.base_url)
+
+        # Get start_id
+        if start_id:
+            # Get start_id from parameter
+            self.settings['start_id'] = int(start_id)
+
+        # Get the number of URLs to go from parameter
+        if url_quantity:
+            # Get url_quantity from parameter
+            self.settings['block_size'] = int(url_quantity)
+
+    def parse(self, response):
+        """
+            a custom method to parse html response and then throw scraped items to Scrapy's pipeline
+        """
+        
+        pass

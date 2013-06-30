@@ -1,0 +1,169 @@
+#!/usr/bin/env python
+
+# Python imoports
+from __future__ import with_statement
+import re
+import sys
+import time
+from datetime import datetime
+from pytz import timezone
+from array import array
+
+# Scrapy imports
+from scrapy import log
+from scrapy import exceptions
+from scrapy.xlib.pydispatch import dispatcher
+from scrapy import signals
+from scrapy.selector import HtmlXPathSelector
+from scrapy.spider import BaseSpider
+from scrapy.http import Request
+
+# Custom imports
+from fatech_production.items import Car
+from fatech_production.items import Link
+from dbutil import *
+from spiderutil import *
+from recon_template import ReconSpider
+
+class CarsReconSpider(ReconSpider):
+    """ Recon spider class which can send request new URLs, parse html response and then throw scraped cars to Scrapy's pipeline. """
+
+    name = 'recon_cars'  # name of the spider for calling: scrapy crawl spider_name
+    allowed_domains = ['www.cars.com']
+
+    def __init__(self, start_id=None, cycles=None, **kwargs):
+        """
+            Assign all custom settings
+        """
+        
+        # assign the name of the website to crawl
+        self.site = 'cars'
+
+        # base_url to add id to
+        self.base_url = "http://www.cars.com/go/search/detail_print.jsp?listingId="
+
+        super(CarsReconSpider, self).__init__(site=self.site, base_url=self.base_url)
+
+        # Get start_id
+        if start_id:
+            # Get start_id from parameter
+            self.settings['start_id'] = int(start_id)
+
+        # Get cycles
+        if cycles:
+            # Get cycles from parameter
+            self.settings['cycles'] = int(cycles)
+
+    def parse(self, response):
+        """
+            a custom method to parse html response and then throw scraped items to Scrapy's pipeline
+        """
+        
+        items = []
+
+        if response.status == 200:
+            
+            hxs = HtmlXPathSelector(response)
+
+            item = Car()
+
+            item['site'] = self.site
+            item['source_url'] = 'http://www.cars.com/go/search/detail_print.jsp?listingId=' + str(response.request.meta['url_id'])
+            item['url_id'] = response.request.meta['url_id']
+            item['description'] = hxs.select('//h1/text()').extract()[0].strip()
+            if item['description'][-1] ==  "-":
+                item['description'] = item['description'][:-1].strip()
+
+            result = extract_YMMT(item['description'])
+            if result != - 1:
+                item['year'] = result['year']
+                item['make'] = result['make']
+                item['model'] = result['model']
+                item['trim'] = result['trim']
+            else:
+                log.msg('[WARNING] Unable to extract YearMakeModelTrim!', level=log.INFO)
+                return
+            
+            try:
+                price = hxs.select('//span[@class="vehiclePrice"]/text()').extract()[0].strip()
+                item['price'] = extract_price(price)
+            except:
+                item['price'] = "UNKNOWN"
+                pass
+
+            key_list = hxs.select('//td[@class="vehicleColumn"]/div/span[1]/text()').extract()
+            text_list = hxs.select('//td[@class="vehicleColumn"]/div/span[2]/text()').extract()
+
+            for i in xrange(len(key_list)):
+                key = key_list[i]
+                key = re.sub(r' #', '_id', key)
+                key = re.sub(r' ', '_', key)
+                key = re.sub(r':', '', key).strip().lower()
+                text = text_list[i].strip()
+                if key.encode('utf-8') == 'mileage':
+                    item['mileage'] = text.replace(',', '')
+                elif key.encode('utf-8') == 'drivetrain':
+                    item['drive_type'] = text
+                elif key.encode('utf-8') == 'doors':
+                    item['doors'] = doors_tostring(text)
+                elif key.encode('utf-8') == 'fuel':
+                    item['fuel_type'] = text
+                else:
+                    field_list = (
+                        'stock_id', 'vin', 'body_style',
+                        'transmission', 'engine', 'exterior_color',
+                        'interior_color', 'cab_type'
+                    )
+                    if key.encode('utf-8') in field_list:
+                        item[key.encode('utf-8')] = text
+
+            try:
+                try:
+                    item['dealer'] = hxs.select('//a[@name="&lid=vdpDealerDetailsName"]/text()').extract()[0].strip()
+                except:
+                    item['dealer'] = hxs.select('//div[@class="basicInfo"]/span[2]/text()').extract()[0].strip()
+                address_info = hxs.select('//div[@id="sellerAddress"]/div[@class="dataPoint"][position() = 2]/span/text()').extract()
+                
+                street_info = address_info[0].strip()
+                street_info = extract_street(street_info)
+                item['street_number'] = street_info['street_number']
+                item['street_name'] = street_info['street_name']
+
+                address_info = address_info[1].strip()
+                address_info = extract_CSZ(address_info)
+                item['city'] = address_info['city']
+                item['zip_code'] = address_info['zip_code']
+                item['state'] = address_info['state']
+            except:
+                pass
+
+            try:
+                item['phone'] = hxs.select('//span[@class="phoneRow"]/span[@class="data"]/text()').extract()[0].strip()
+            except:
+                pass
+
+            items.append(item)
+
+            item = Link()
+            item['url'] = self.base_url + str(response.request.meta['url_id'])
+            item['url_id'] = response.request.meta['url_id']
+            item['status'] = 'S'
+            item['spider'] = 'lead'
+            item['site'] = self.site
+
+            # Set a new start_id
+            self.set_new_startid(int(response.request.meta['url_id']))
+
+            items.append(item)
+        else:
+            item = Link()
+            item['url'] = self.base_url + str(response.request.meta['url_id'])
+            item['url_id'] = response.request.meta['url_id']
+            item['status'] = 'E'
+            item['spider'] = 'lead'
+            item['site'] = self.site
+            items.append(item)
+
+        return items
+
+    

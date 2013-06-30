@@ -1,0 +1,62 @@
+#!/usr/bin/env python
+
+# Python imoports
+from __future__ import with_statement
+import re
+import sys
+import time
+from datetime import datetime
+from pytz import timezone
+from array import array
+
+# Scrapy imports
+from scrapy import log
+from scrapy import exceptions
+from scrapy.xlib.pydispatch import dispatcher
+from scrapy import signals
+from scrapy.selector import HtmlXPathSelector
+from scrapy.spider import BaseSpider
+from scrapy.http import Request
+
+# Custom imports
+from fatech_production.items import Car
+from fatech_production.items import Link
+from spiderutil import *
+from main_template import MainSpider
+
+class CarsMainSpider(MainSpider):
+    """ lead spider class which can send request new URLs, parse html response and then throw scraped cars to Scrapy's pipeline. """
+
+    name = 'cars_main'  # name of the spider for calling: scrapy crawl spider_name
+    allowed_domains = ['www.cars.com']
+
+    def __init__(self, start_id=None, end_id=None, **kwargs):
+        """
+            Assign all custom settings
+        """
+        
+        # assign the name of the website to crawl
+        self.site = 'cars'
+
+        # base_url to add id to
+        self.base_url = "http://www.cars.com/go/search/detail_print.jsp?listingId="
+
+        super(CarsMainSpider, self).__init__(site=self.site, base_url=self.base_url)
+
+        # Get start_id
+        if start_id:
+            # Get start_id from parameter
+            self.settings['start_id'] = int(start_id)
+
+        # Get end_id
+        if end_id:
+            # Get end_id from parameter
+            self.settings['end_id'] = int(end_id)
+
+    def parse(self, response):
+        """
+            a custom method to parse html response and then throw scraped items to Scrapy's pipeline
+        """
+        from cars_recon import CarsReconSpider
+        return CarsReconSpider().parse(response)
+    
